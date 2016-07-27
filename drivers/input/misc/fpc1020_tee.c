@@ -997,16 +997,14 @@ static void fpc1020_suspend_resume(struct work_struct *work)
 	struct fpc1020_data *fpc1020 =
 		container_of(work, typeof(*fpc1020), pm_work);
 
+	/* Escalate fingerprintd priority when screen is off */
 	if (fpc1020->screen_state) {
 		set_fpc_irq(fpc1020, true);
 		set_fingerprintd_nice(0);
-	} else
-		/*
-		 * Elevate fingerprintd priority when screen is off to ensure
-		 * the fingerprint sensor is responsive and that the haptic
-		 * response on successful verification always fires.
-		 */
-		set_fingerprintd_nice(-1);
+	}
+	else {
+		set_fingerprintd_nice(-20);
+	}
 
 	sysfs_notify(&fpc1020->dev->kobj, NULL,
 				dev_attr_screen_state.attr.name);
