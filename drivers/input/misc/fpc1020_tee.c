@@ -143,6 +143,8 @@ struct fpc1020_data {
 	spinlock_t irq_lock;
 };
 
+extern bool s1302_is_keypad_stopped(void);
+
 extern bool s3320_touch_active(void);
 
 static struct fpc1020_data *fpc1020_g = NULL;
@@ -332,14 +334,18 @@ static ssize_t report_home_set(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct  fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+	
+	bool ignore_keypad;
+
+	if (s1302_is_keypad_stopped() || virtual_key_enable)
+		ignore_keypad = true;
+	else
+		ignore_keypad = false;
         
 	if (!strncmp(buf, "down", strlen("down")))
 	{
-#ifdef CONFIG_BOEFFLA_TOUCH_KEY_CONTROL
-		btkc_touch_button();
-#endif
 #ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-		if(!virtual_key_enable && !s3320_touch_active()){
+		if(!ignore_keypad){
 	 		input_report_key(fpc1020->input_dev,
 							KEY_HOME, 1);
 			input_sync(fpc1020->input_dev);
@@ -349,7 +355,7 @@ static ssize_t report_home_set(struct device *dev,
 	else if (!strncmp(buf, "up", strlen("up")))
 	{
 #ifdef VENDOR_EDIT //WayneChang, 2015/12/02, add for key to abs, simulate key in abs through virtual key system
-		if(!virtual_key_enable){
+		if(!ignore_keypad){
 			input_report_key(fpc1020->input_dev,
 							KEY_HOME, 0);
 			input_sync(fpc1020->input_dev);
@@ -978,7 +984,7 @@ static void set_fingerprintd_nice(int nice)
 
 	read_lock(&tasklist_lock);
 	for_each_process(p) {
-		if (!memcmp(p->comm, "fingerprint@2.0", 16) || !memcmp(p->comm, "fingerprintd", 13)) {
+		if (!memcmp(p->comm, "fingerprintd", 13)) {
 			set_user_nice(p, nice);
 			break;
 		}
@@ -991,14 +997,16 @@ static void fpc1020_suspend_resume(struct work_struct *work)
 	struct fpc1020_data *fpc1020 =
 		container_of(work, typeof(*fpc1020), pm_work);
 
-	/* Escalate fingerprintd priority when screen is off */
 	if (fpc1020->screen_state) {
 		set_fpc_irq(fpc1020, true);
 		set_fingerprintd_nice(0);
-	}
-	else {
-		set_fingerprintd_nice(-20);
-	}
+	} else
+		/*
+		 * Elevate fingerprintd priority when screen is off to ensure
+		 * the fingerprint sensor is responsive and that the haptic
+		 * response on successful verification always fires.
+		 */
+		set_fingerprintd_nice(-1);
 
 	sysfs_notify(&fpc1020->dev->kobj, NULL,
 				dev_attr_screen_state.attr.name);
@@ -1014,16 +1022,12 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 	if (event != FB_EARLY_EVENT_BLANK)
 		return 0;
 
-	switch (*blank) {
-		case FB_BLANK_UNBLANK:
-		case FB_BLANK_VSYNC_SUSPEND:
-			fpc1020->screen_state = 1;
-			queue_work(system_highpri_wq, &fpc1020->pm_work);
-			break;
-		case FB_BLANK_POWERDOWN:
-			fpc1020->screen_state = 0;
-			queue_work(system_highpri_wq, &fpc1020->pm_work);
-			break;
+	if (*blank == FB_BLANK_UNBLANK) {
+		fpc1020->screen_state = 1;
+		queue_work(system_highpri_wq, &fpc1020->pm_work);
+	} else if (*blank == FB_BLANK_POWERDOWN) {
+		fpc1020->screen_state = 0;
+		queue_work(system_highpri_wq, &fpc1020->pm_work);
 	}
 
 	return 0;
@@ -1033,10 +1037,18 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 static irqreturn_t fpc1020_irq_handler(int irq, void *handle)
 {
 	struct fpc1020_data *fpc1020 = handle;
+	//dev_info(fpc1020->dev, "%s\n", __func__);
 
+	/* Make sure 'wakeup_enabled' is updated before using it
+	** since this is interrupt context (other thread...) */
+	smp_rmb();
+/*
+	if (fpc1020->wakeup_enabled ) {
+		wake_lock_timeout(&fpc1020->ttw_wl, msecs_to_jiffies(FPC_TTW_HOLD_TIME));
+	}
+*/
+	wake_lock_timeout(&fpc1020->ttw_wl, msecs_to_jiffies(FPC_TTW_HOLD_TIME));//changhua add for KeyguardUpdateMonitor: fingerprint acquired, grabbing fp wakelock
 	sysfs_notify(&fpc1020->dev->kobj, NULL, dev_attr_irq.attr.name);
-
-	wake_lock_timeout(&fpc1020->ttw_wl, msecs_to_jiffies(FPC_TTW_HOLD_TIME));
 
 	if (!fpc1020->screen_state) {
 		input_report_key(fpc1020->input_dev, KEY_FINGERPRINT, 1);
@@ -1196,7 +1208,6 @@ static int fpc1020_probe(struct spi_device *spi)
 
     #if defined(CONFIG_FB)
 	fpc1020->fb_notif.notifier_call = fb_notifier_callback;
-	fpc1020->fb_notif.priority = INT_MAX;
 	rc = fb_register_client(&fpc1020->fb_notif);
 	if(rc)
 		dev_err(fpc1020->dev, "Unable to register fb_notifier: %d\n", rc);
