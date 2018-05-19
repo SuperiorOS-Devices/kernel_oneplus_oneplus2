@@ -64,6 +64,14 @@ static int set_cpu_freq_raw(int cpu, unsigned long rate, bool boost_src)
 	return clk_set_rate(cpu_clk[cpu], rate);
 }
 
+static int set_cpu_freq_raw(int cpu, unsigned long rate, bool boost_src)
+{
+	if (is_boosted && !boost_src)
+		return 0;
+ 
+	return clk_set_rate(cpu_clk[cpu], rate);
+}
+
 static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
 			unsigned int index)
 {
