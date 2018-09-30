@@ -223,8 +223,8 @@ void thaw_fingerprintd(void)
 	pm_nosig_freezing = false;
 
 	read_lock(&tasklist_lock);
-	for_each_process_thread(g, p) {
-		if (!memcmp(p->comm, "fingerprint", 13))
+	for_each_process(p) {
+		if (!memcmp(p->comm, "fingerprint@2.0", 16) || !memcmp(p->comm, "fingerprintd", 13)) {
 			__thaw_task(p);
 	}
 	read_unlock(&tasklist_lock);
