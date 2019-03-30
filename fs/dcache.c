@@ -78,7 +78,7 @@
  *   dentry1->d_lock
  *     dentry2->d_lock
  */
-int sysctl_vfs_cache_pressure __read_mostly = 100;
+int sysctl_vfs_cache_pressure __read_mostly = 20;
 EXPORT_SYMBOL_GPL(sysctl_vfs_cache_pressure);
 
 static __cacheline_aligned_in_smp DEFINE_SPINLOCK(dcache_lru_lock);
@@ -3052,6 +3052,22 @@ rename_retry:
 	write_seqlock(&rename_lock);
 	goto again;
 }
+
+void d_tmpfile(struct dentry *dentry, struct inode *inode)
+{
+	inode_dec_link_count(inode);
+	BUG_ON(dentry->d_name.name != dentry->d_iname ||
+		!hlist_unhashed(&dentry->d_u.d_alias) ||
+		!d_unlinked(dentry));
+	spin_lock(&dentry->d_parent->d_lock);
+	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+	dentry->d_name.len = sprintf(dentry->d_iname, "#%llu",
+				(unsigned long long)inode->i_ino);
+	spin_unlock(&dentry->d_lock);
+	spin_unlock(&dentry->d_parent->d_lock);
+	d_instantiate(dentry, inode);
+}
+EXPORT_SYMBOL(d_tmpfile);
 
 /**
  * find_inode_number - check for dentry with name
