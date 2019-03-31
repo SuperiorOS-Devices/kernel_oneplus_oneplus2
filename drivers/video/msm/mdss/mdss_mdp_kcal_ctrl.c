@@ -621,7 +621,6 @@ out_free_mem:
 	return ret;
 }
 
-
 static int kcal_ctrl_remove(struct platform_device *pdev)
 {
 	struct kcal_lut_data *lut_data = platform_get_drvdata(pdev);
