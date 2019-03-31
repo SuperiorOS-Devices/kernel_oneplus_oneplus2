@@ -513,5 +513,12 @@ config FB_MSM_QPIC_PANEL_DETECT
 
 if FB_MSM_MDSS
 	source "drivers/video/msm/mdss/Kconfig"
+
+config KLAPSE
+    bool CONFIG_KLAPSE
+    default n
+    help
+        A simple rgb dynamic lapsing module similar to LineageOS' livedisplay
+
 endif
 endif
