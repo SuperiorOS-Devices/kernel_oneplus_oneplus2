@@ -13,16 +13,15 @@ chmod +x "scripts.sh"
 make "clean"
 
 #STEP-2
-make "menuconfig"
-
-#STEP-3
 TOOLCHAIN="/home/abhijith/dev/toolchain/bin/aarch64-linux-android-"
 export CROSS_COMPILE="/home/abhijith/dev/toolchain/bin/aarch64-linux-android-"
 ARCHITECTURE=arm64
 
-
 #STEP-4
 make "matrix_defconfig"
+
+#STEP-3
+make "menuconfig"
 
 #STEP-5
 make "-j4"
