@@ -28,7 +28,6 @@
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
 
 static DEFINE_PER_CPU(struct od_cpu_dbs_info_s, od_cpu_dbs_info);
-static DEFINE_PER_CPU(struct od_dbs_tuners *, cached_tuners);
 
 static DEFINE_PER_CPU(struct od_dbs_tuners *, cached_tuners);
 
@@ -543,49 +542,6 @@ static int od_init(struct dbs_data *dbs_data, struct cpufreq_policy *policy)
 	if (idle_time != -1ULL) {
 		/* Idle micro accounting is supported. Use finer thresholds */
 		tuners->up_threshold = MICRO_FREQUENCY_UP_THRESHOLD;
-	} else {
-		tuners->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
-	}
-
-	tuners->sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR;
-	tuners->ignore_nice_load = 0;
-	tuners->powersave_bias = default_powersave_bias;
-	tuners->io_is_busy = should_io_be_busy();
-
-	save_tuners(policy, tuners);
-
-	return tuners;
-}
-
-static struct od_dbs_tuners *restore_tuners(struct cpufreq_policy *policy)
-{
-	int cpu;
-
-	if (have_governor_per_policy())
-		cpu = cpumask_first(policy->related_cpus);
-	else
-		cpu = 0;
-
-	return per_cpu(cached_tuners, cpu);
-}
-
-static int od_init(struct dbs_data *dbs_data, struct cpufreq_policy *policy)
-{
-	struct od_dbs_tuners *tuners;
-	u64 idle_time;
-	int cpu;
-
-	tuners = restore_tuners(policy);
-	if (!tuners) {
-		tuners = alloc_tuners(policy);
-		if (IS_ERR(tuners))
-			return PTR_ERR(tuners);
-	}
-
-	cpu = get_cpu();
-	idle_time = get_cpu_idle_time_us(cpu, NULL);
-	put_cpu();
-	if (idle_time != -1ULL) {
 		/*
 		 * In nohz/micro accounting case we set the minimum frequency
 		 * not depending on HZ, but fixed (very low). The deferred
@@ -593,6 +549,8 @@ static int od_init(struct dbs_data *dbs_data, struct cpufreq_policy *policy)
 		*/
 		dbs_data->min_sampling_rate = MICRO_FREQUENCY_MIN_SAMPLE_RATE;
 	} else {
+		tuners->up_threshold = DEF_FREQUENCY_UP_THRESHOLD;
+
 		/* For correct statistics, we need 10 ticks for each measure */
 		dbs_data->min_sampling_rate = MIN_SAMPLING_RATE_RATIO *
 			jiffies_to_usecs(10);
