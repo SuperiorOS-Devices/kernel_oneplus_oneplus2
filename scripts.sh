@@ -9,6 +9,7 @@ VER="1.6"
 
 
 #STEP-1
+chmod +x "scripts.sh"
 make "clean"
 
 #STEP-2
