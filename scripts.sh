@@ -15,7 +15,7 @@ make "clean"
 #STEP-2-Compiling the kernel
 TOOLCHAIN="/home/abhijith/dev/toolchain/bin/aarch64-linux-android-"
 export CROSS_COMPILE="/home/abhijith/dev/toolchain/bin/aarch64-linux-android-"
-ARCHITECTURE=arm64
+export ARCH=arm64 && SUBARCH=arm64
 
 #STEP-3-creating config for kernel
 make "matrix_defconfig"
