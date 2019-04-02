@@ -547,8 +547,6 @@ void kcal_klapse_push(int r, int g, int b)
 	lut_cpy->blue = b;
 
         mdss_mdp_kcal_update_pcc(lut_cpy);
-	mdss_mdp_kcal_update_pa(lut_cpy);
-	mdss_mdp_kcal_update_igc(lut_cpy);
 }
 #endif
 
