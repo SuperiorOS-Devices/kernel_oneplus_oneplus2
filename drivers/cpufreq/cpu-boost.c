@@ -26,8 +26,6 @@
 #include <linux/input.h>
 #include <linux/time.h>
 
-#include "../../kernel/sched/sched.h"
-
 struct cpu_sync {
 	struct task_struct *thread;
 	wait_queue_head_t sync_wq;
@@ -40,7 +38,6 @@ struct cpu_sync {
 	unsigned int input_boost_min;
 	unsigned int task_load;
 	unsigned int input_boost_freq;
-	unsigned int nr_running;
 };
 
 static DEFINE_PER_CPU(struct cpu_sync, sync_info);
@@ -59,8 +56,7 @@ module_param(sysctl_thermal_aware_scheduling, uint, 0644);
 static unsigned int sync_threshold;
 module_param(sync_threshold, uint, 0644);
 
-static unsigned int input_boost_enabled = 1;
-module_param(input_boost_enabled, uint, 0644);
+static bool input_boost_enabled;
 
 static unsigned int input_boost_ms = 40;
 module_param(input_boost_ms, uint, 0644);
@@ -80,13 +76,12 @@ static struct delayed_work input_boost_rem;
 static u64 last_input_time;
 #define MIN_INPUT_INTERVAL (150 * USEC_PER_MSEC)
 
-static unsigned int cnt_nr_running;
-
 static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 {
 	int i, ntokens = 0;
 	unsigned int val, cpu;
 	const char *cp = buf;
+	bool enabled = false;
 
 	while ((cp = strpbrk(cp + 1, " :")))
 		ntokens++;
@@ -97,7 +92,7 @@ static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 			return -EINVAL;
 		for_each_possible_cpu(i)
 			per_cpu(sync_info, i).input_boost_freq = val;
-		goto out;
+		goto check_enable;
 	}
 
 	/* CPU:value pair */
@@ -116,7 +111,15 @@ static int set_input_boost_freq(const char *buf, const struct kernel_param *kp)
 		cp++;
 	}
 
-out:
+check_enable:
+	for_each_possible_cpu(i) {
+		if (per_cpu(sync_info, i).input_boost_freq) {
+			enabled = true;
+			break;
+		}
+	}
+	input_boost_enabled = enabled;
+
 	return 0;
 }
 
@@ -168,11 +171,6 @@ static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
 
 		min = max(b_min, ib_min);
 
-		if (cpu == 4 && min > 0 && cnt_nr_running == 0)
-                        break;
-
-		min = min(min, policy->max);
-
 		pr_debug("CPU%u policy min before boost: %u kHz\n",
 			 cpu, policy->min);
 		pr_debug("CPU%u boost min: %u kHz\n", cpu, min);
@@ -193,7 +191,6 @@ static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
 
 static struct notifier_block boost_adjust_nb = {
 	.notifier_call = boost_adjust_notify,
-	.priority = INT_MAX,
 };
 
 static void do_boost_rem(struct work_struct *work)
@@ -215,8 +212,7 @@ static void update_policy_online(void)
 	get_online_cpus();
 	for_each_online_cpu(i) {
 		pr_debug("Updating policy for CPU%d\n", i);
-		if (i == 0 || i == 4)
-			cpufreq_update_policy(i);
+		cpufreq_update_policy(i);
 	}
 	put_online_cpus();
 }
@@ -232,8 +228,6 @@ static void do_input_boost_rem(struct work_struct *work)
 		i_sync_info = &per_cpu(sync_info, i);
 		i_sync_info->input_boost_min = 0;
 	}
-
-	cnt_nr_running = 0;
 
 	/* Update policies for all online CPUs */
 	update_policy_online();
@@ -374,9 +368,6 @@ static void do_input_boost(struct work_struct *work)
 	for_each_possible_cpu(i) {
 		i_sync_info = &per_cpu(sync_info, i);
 		i_sync_info->input_boost_min = i_sync_info->input_boost_freq;
-
-		if (i >= 4)
-			cnt_nr_running += cpu_rq(i)->nr_running;
 	}
 
 	/* Update policies for all online CPUs */
@@ -400,12 +391,11 @@ static void cpuboost_input_event(struct input_handle *handle,
 {
 	u64 now;
 
-
 	if (!input_boost_enabled)
 		return;
 
 	now = ktime_to_us(ktime_get());
-	if (now - last_input_time < (input_boost_ms * USEC_PER_MSEC))
+	if (now - last_input_time < MIN_INPUT_INTERVAL)
 		return;
 
 	if (work_pending(&input_boost_work))
@@ -491,10 +481,7 @@ static int cpu_boost_init(void)
 	int cpu, ret;
 	struct cpu_sync *s;
 
-	cpu_boost_wq =
-	    alloc_workqueue("cpuboost_wq",
-			    WQ_HIGHPRI | WQ_UNBOUND, 0);
-
+	cpu_boost_wq = alloc_workqueue("cpuboost_wq", WQ_HIGHPRI, 0);
 	if (!cpu_boost_wq)
 		return -EFAULT;
 
