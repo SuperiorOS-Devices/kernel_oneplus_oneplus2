@@ -51,12 +51,6 @@ static bool suspend_freeze_wake;
 extern void thaw_fingerprintd(void);
 #endif
 
-void freeze_set_ops(const struct platform_freeze_ops *ops)
-{
-	lock_system_sleep();
-	freeze_ops = ops;
-	unlock_system_sleep();
-}
 
 static void freeze_begin(void)
 {
