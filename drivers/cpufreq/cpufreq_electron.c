@@ -156,7 +156,11 @@ struct cpufreq_electron_tunables {
 	 */
 	unsigned int max_freq_hysteresis;
 
-	/* Improves frequency selection for more energy */
+	/* Use agressive frequency step calculation, above a given load threshold */
+	bool fastlane;
+	unsigned int fastlane_threshold;
+
+       /* Improves frequency selection for more energy */
 	bool powersave_bias;
 
 	/* Sets max frequency when screen is off */
@@ -393,6 +397,17 @@ static unsigned int choose_freq(struct cpufreq_electron_policyinfo *pcpu,
 	return freq;
 }
 
+static unsigned int fastlane_freq(struct cpufreq_interactive_policyinfo *pcpu,
+		unsigned int cpu_load)
+{
+	unsigned int freq;
+
+	freq = pcpu->policy->min + cpu_load * (pcpu->policy->max - pcpu->policy->min) / 100;
+
+	return freq;
+}
+
+
 static u64 update_load(int cpu)
 {
 	struct cpufreq_electron_policyinfo *ppol = per_cpu(polinfo, cpu);
@@ -523,13 +538,21 @@ static void cpufreq_electron_timer(unsigned long data)
 		    cpu_load <= MAX_LOCAL_LOAD) {
 			new_freq = this_hispeed_freq;
 		} else {
-			new_freq = choose_freq(ppol, loadadjfreq);
+
+			if (tunables->fastlane && cpu_load > tunables->fastlane_threshold)
+				new_freq = fastlane_freq(ppol, cpu_load);
+			else
+				new_freq = choose_freq(ppol, loadadjfreq);
 
 			if (new_freq < this_hispeed_freq)
 				new_freq = this_hispeed_freq;
 		}
 	} else {
-		new_freq = choose_freq(ppol, loadadjfreq);
+		if (tunables->fastlane && cpu_load > tunables->fastlane_threshold)
+			new_freq = fastlane_freq(ppol, cpu_load);
+		else
+			new_freq = choose_freq(ppol, loadadjfreq);
+
 		if (new_freq > tunables->hispeed_freq &&
 				ppol->target_freq < tunables->hispeed_freq)
 			new_freq = tunables->hispeed_freq;
@@ -712,7 +735,9 @@ static void cpufreq_electron_boost(struct cpufreq_electron_tunables *tunables)
 			anyboost = 1;
 		}
 
-		/*
+		 * Create show/store routines
+ * - sys: One governor instance for complete SYSTEM
+                /*
 		 * Set floor freq and (re)start timer for when last
 		 * validated.
 		 */
@@ -1360,6 +1385,46 @@ static ssize_t store_use_migration_notif(
 	return count;
 }
 
+static ssize_t show_fastlane(
+		struct cpufreq_interactive_tunables *tunables, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", tunables->fastlane);
+}
+
+static ssize_t store_fastlane(
+			struct cpufreq_interactive_tunables *tunables,
+			const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+	tunables->fastlane = val;
+	return count;
+}
+
+static ssize_t show_fastlane_threshold(
+		struct cpufreq_interactive_tunables *tunables, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", tunables->fastlane_threshold);
+}
+
+static ssize_t store_fastlane_threshold(
+			struct cpufreq_interactive_tunables *tunables,
+			const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret < 0 || ret > 100)
+		return ret;
+	tunables->fastlane_threshold = val;
+	return count;
+}
+
 /*
  * Create show/store routines
  * - sys: One governor instance for complete SYSTEM
@@ -1413,6 +1478,9 @@ show_store_gov_pol_sys(max_freq_hysteresis);
 show_store_gov_pol_sys(align_windows);
 show_store_gov_pol_sys(powersave_bias);
 show_store_gov_pol_sys(screen_off_maxfreq);
+show_store_gov_pol_sys(fastlane);
+show_store_gov_pol_sys(fastlane_threshold);
+
 
 #define gov_sys_attr_rw(_name)						\
 static struct global_attr _name##_gov_sys =				\
@@ -1442,6 +1510,9 @@ gov_sys_pol_attr_rw(max_freq_hysteresis);
 gov_sys_pol_attr_rw(align_windows);
 gov_sys_pol_attr_rw(powersave_bias);
 gov_sys_pol_attr_rw(screen_off_maxfreq);
+gov_sys_pol_attr_rw(fastlane);
+gov_sys_pol_attr_rw(fastlane_threshold);
+
 
 static struct global_attr boostpulse_gov_sys =
 	__ATTR(boostpulse, 0200, NULL, store_boostpulse_gov_sys);
@@ -1468,6 +1539,8 @@ static struct attribute *electron_attributes_gov_sys[] = {
 	&align_windows_gov_sys.attr,
 	&powersave_bias_gov_sys.attr,
 	&screen_off_maxfreq_gov_sys.attr,
+	&fastlane_gov_sys.attr,
+	&fastlane_threshold_gov_sys.attr,
 	NULL,
 };
 
@@ -1495,6 +1568,8 @@ static struct attribute *electron_attributes_gov_pol[] = {
 	&align_windows_gov_pol.attr,
 	&powersave_bias_gov_pol.attr,
 	&screen_off_maxfreq_gov_pol.attr,
+	&fastlane_gov_pol.attr,
+	&fastlane_threshold_gov_pol.attr,
 	NULL,
 };
 
@@ -1535,6 +1610,8 @@ static struct cpufreq_electron_tunables *alloc_tunable(
 	tunables->prev_timer_rate = DEFAULT_TIMER_RATE;
 	tunables->boostpulse_duration_val = DEFAULT_MIN_SAMPLE_TIME;
 	tunables->timer_slack_val = DEFAULT_TIMER_SLACK;
+	tunables->fastlane = false;
+	tunables->fastlane_threshold = 50;
 
 	spin_lock_init(&tunables->target_loads_lock);
 	spin_lock_init(&tunables->above_hispeed_delay_lock);
