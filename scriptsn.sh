@@ -1,4 +1,4 @@
-
+#!/bin/bash
 ####Scripts when i don't want to clear stuff###########
 
 M_DIR="$KROOT/matrix-aosp"
