@@ -30,10 +30,10 @@
 #include <trace/events/power.h>
 
 // AP: Default startup frequencies
-#define CONFIG_CPU_FREQ_MIN_CLUSTER1	384000
+#define CONFIG_CPU_FREQ_MIN_CLUSTER1	302400
 #define CONFIG_CPU_FREQ_MAX_CLUSTER1	1555200
-#define CONFIG_CPU_FREQ_MIN_CLUSTER2	384000
-#define CONFIG_CPU_FREQ_MAX_CLUSTER2	1766400
+#define CONFIG_CPU_FREQ_MIN_CLUSTER2	302400
+#define CONFIG_CPU_FREQ_MAX_CLUSTER2	1632000
 
 static DEFINE_MUTEX(l2bw_lock);
 
@@ -55,14 +55,6 @@ struct cpufreq_suspend_t {
 };
 
 static DEFINE_PER_CPU(struct cpufreq_suspend_t, cpufreq_suspend);
-
-static int set_cpu_freq_raw(int cpu, unsigned long rate, bool boost_src)
-{
-	if (is_boosted && !boost_src)
-		return 0;
- 
-	return clk_set_rate(cpu_clk[cpu], rate);
-}
 
 static int set_cpu_freq_raw(int cpu, unsigned long rate, bool boost_src)
 {
